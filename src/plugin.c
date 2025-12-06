@@ -1,22 +1,49 @@
+#include <assert.h>
 #include <glib.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "tracer/TracerInterface.h"
 #include "xemu/qemu-plugin-ext.h"
 
+typedef struct {
+  const char* function_name;
+  size_t num_arguments;
+  unsigned int argument_stack_offsets[16];
+  bool count_only;
+} TraceConfig;
+
 static const uint64_t KeWaitForSingleObjectAddr = 0x80022f5a;
 static const uint64_t KeWaitForSingleObjectRetAddr = 0x800231f9;
 static const uint64_t KeWaitForSingleObjectRaiseAddr = 0x80022fe6;
-static const char KeWaitForSingleObjectTag[] = "KeWaitForSingleObject";
 
 static const uint64_t KeWaitForMultipleObjectsAddr = 0x80022c05;
 static const uint64_t KeWaitForMultipleObjectsRetAddr = 0x80022d37;
 static const uint64_t KeWaitForMultipleObjectsRaiseAddr = 0x80022f57;
-static const char KeWaitForMultipleObjectsTag[] = "KeWaitForMultipleObjects";
 
 static const uint64_t KeSetEventAddr = 0x80023baa;
-static const char KeSetEventTag[] = "KeSetEvent";
+
+static const TraceConfig g_trace_ke_wait_for_single_object = {
+    .function_name = "KeWaitForSingleObject",
+    .num_arguments = 1,
+    .argument_stack_offsets = {4},  // Object is param 0
+    .count_only = false,
+};
+
+static const TraceConfig g_trace_ke_wait_for_multiple_objects = {
+    .function_name = "KeWaitForMultipleObjects",
+    .num_arguments = 1,
+    .argument_stack_offsets = {8},  // Objects array is param 1
+    .count_only = false,
+};
+
+static const TraceConfig g_trace_ke_set_event = {
+    .function_name = "KeSetEvent",
+    .num_arguments = 1,
+    .argument_stack_offsets = {4},  // Event object is param 0
+    .count_only = true,
+};
 
 QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
@@ -58,6 +85,7 @@ static void vcpu_init(qemu_plugin_id_t id, unsigned int vcpu_index) {
 
 static bool get_stack_argument(uint32_t offset, uint32_t* out_arg,
                                uint32_t* out_esp) {
+  assert(out_arg && out_esp);
   if (!context.esp_handle) {
     return false;
   }
@@ -70,9 +98,7 @@ static bool get_stack_argument(uint32_t offset, uint32_t* out_arg,
   uint32_t esp_val = 0;
   if (read_len >= 4 && reg_data->len >= 4) {
     memcpy(&esp_val, reg_data->data, 4);
-    if (out_esp) {
-      *out_esp = esp_val;
-    }
+    *out_esp = esp_val;
     uint64_t arg_vaddr = esp_val + offset;
 
     if (qemu_plugin_read_memory_vaddr(arg_vaddr, mem_data, 4)) {
@@ -88,17 +114,20 @@ static bool get_stack_argument(uint32_t offset, uint32_t* out_arg,
   return success;
 }
 
-static void wait_for_single_object_enter(unsigned int vcpu_index,
-                                         void* userdata) {
-  (void)userdata;
+static void trace_entry_callback(unsigned int vcpu_index, void* userdata) {
   (void)vcpu_index;
+  const TraceConfig* config = (const TraceConfig*)userdata;
 
   uint32_t esp;
-  uint32_t object_param;
+  uint32_t params[16];
+  for (size_t i = 0; i < config->num_arguments; ++i) {
+    get_stack_argument(config->argument_stack_offsets[i], params + i, &esp);
+  }
 
-  if (get_stack_argument(4, &object_param, &esp)) {
-    const char* function_name = userdata;
-    TracerPushEntry(function_name, object_param, esp);
+  if (config->count_only) {
+    TracerCount(config->function_name, config->num_arguments, params);
+  } else {
+    TracerPushEntry(config->function_name, esp, config->num_arguments, params);
   }
 }
 
@@ -123,66 +152,37 @@ static void pop_entry(unsigned int vcpu_index, void* userdata) {
   g_byte_array_free(reg_data, TRUE);
 }
 
-static void wait_for_multiple_objects_enter(unsigned int vcpu_index,
-                                            void* userdata) {
-  (void)userdata;
-  (void)vcpu_index;
-
-  uint32_t esp;
-  uint32_t object_array_param;
-
-  if (get_stack_argument(8, &object_array_param, &esp)) {
-    const char* function_name = userdata;
-    TracerPushEntry(function_name, object_array_param, esp);
-  }
-}
-
-static void ke_set_event_enter(unsigned int vcpu_index, void* userdata) {
-  (void)userdata;
-  (void)vcpu_index;
-  uint32_t esp;
-  uint32_t object_param;
-
-  if (get_stack_argument(4, &object_param, &esp)) {
-    const char* function_name = userdata;
-
-    TracerSignal(function_name, object_param, esp);
-  }
-}
-
 static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb* tb) {
   (void)id;
 
-  // Iterate over every instruction in the block
   size_t n = qemu_plugin_tb_n_insns(tb);
 
   for (size_t i = 0; i < n; ++i) {
     struct qemu_plugin_insn* insn = qemu_plugin_tb_get_insn(tb, i);
     uint64_t vaddr = qemu_plugin_insn_vaddr(insn);
 
-    // Check individual instruction addresses
     if (vaddr == KeWaitForSingleObjectAddr) {
-      qemu_plugin_register_vcpu_insn_exec_cb(insn, wait_for_single_object_enter,
-                                             QEMU_PLUGIN_CB_R_REGS,
-                                             (void*)KeWaitForSingleObjectTag);
+      qemu_plugin_register_vcpu_insn_exec_cb(
+          insn, trace_entry_callback, QEMU_PLUGIN_CB_R_REGS,
+          (void*)&g_trace_ke_wait_for_single_object);
     } else if (vaddr == KeWaitForSingleObjectRetAddr ||
                vaddr == KeWaitForSingleObjectRaiseAddr) {
-      qemu_plugin_register_vcpu_insn_exec_cb(insn, pop_entry,
-                                             QEMU_PLUGIN_CB_R_REGS,
-                                             (void*)KeWaitForSingleObjectTag);
+      qemu_plugin_register_vcpu_insn_exec_cb(
+          insn, pop_entry, QEMU_PLUGIN_CB_R_REGS,
+          (void*)g_trace_ke_wait_for_single_object.function_name);
     } else if (vaddr == KeSetEventAddr) {
-      qemu_plugin_register_vcpu_insn_exec_cb(insn, ke_set_event_enter,
+      qemu_plugin_register_vcpu_insn_exec_cb(insn, trace_entry_callback,
                                              QEMU_PLUGIN_CB_R_REGS,
-                                             (void*)KeSetEventTag);
+                                             (void*)&g_trace_ke_set_event);
     } else if (vaddr == KeWaitForMultipleObjectsAddr) {
       qemu_plugin_register_vcpu_insn_exec_cb(
-          insn, wait_for_multiple_objects_enter, QEMU_PLUGIN_CB_R_REGS,
-          (void*)KeWaitForMultipleObjectsTag);
+          insn, trace_entry_callback, QEMU_PLUGIN_CB_R_REGS,
+          (void*)&g_trace_ke_wait_for_multiple_objects);
     } else if (vaddr == KeWaitForMultipleObjectsRetAddr ||
                vaddr == KeWaitForMultipleObjectsRaiseAddr) {
       qemu_plugin_register_vcpu_insn_exec_cb(
           insn, pop_entry, QEMU_PLUGIN_CB_R_REGS,
-          (void*)KeWaitForMultipleObjectsTag);
+          (void*)g_trace_ke_wait_for_multiple_objects.function_name);
     }
   }
 }
