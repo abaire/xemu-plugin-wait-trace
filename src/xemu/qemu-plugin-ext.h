@@ -3,7 +3,7 @@
 
 #include <qemu-plugin.h>
 
-typedef void (*qemu_plugin_command_cb_t)(const char *args);
+typedef void (*qemu_plugin_command_cb_t)(const char* args);
 
 /**
  * qemu_plugin_register_command() - registers a debug monitor command
@@ -12,7 +12,7 @@ typedef void (*qemu_plugin_command_cb_t)(const char *args);
  *      monitor.
  */
 QEMU_PLUGIN_API
-void qemu_plugin_register_command(const char *name,
+void qemu_plugin_register_command(const char* name,
                                   qemu_plugin_command_cb_t cb);
 
 /**
@@ -20,6 +20,6 @@ void qemu_plugin_register_command(const char *name,
  * @name: String previously passed to qemu_plugin_register_command.
  */
 QEMU_PLUGIN_API
-void qemu_plugin_unregister_command(const char *name);
+void qemu_plugin_unregister_command(const char* name);
 
-#endif // XEMU_QEMU_PLUGIN_EXT_H
+#endif  // XEMU_QEMU_PLUGIN_EXT_H
