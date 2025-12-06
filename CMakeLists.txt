@@ -3,6 +3,7 @@ project(xemu_wait_trace_plugin C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # --- Configuration ---
 set(XEMU_SOURCE_DIR "" CACHE PATH "Path to xemu source tree")
