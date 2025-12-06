@@ -14,7 +14,12 @@ Tracer tracer_instance;
 void Tracer::Insert(const std::string &function, uint32_t object_param,
                     uint32_t esp) {
   std::lock_guard<std::mutex> lock(tracer_mutex);
-  wait_entries[function].insert(std::make_pair(object_param, esp));
+  WaitEntry entry{
+      .id = next_id++,
+      .wait_object = object_param,
+      .esp = esp,
+  };
+  wait_entries[function].insert(entry);
 }
 
 void Tracer::Remove(const std::string &function, uint32_t current_esp) {
@@ -24,11 +29,11 @@ void Tracer::Remove(const std::string &function, uint32_t current_esp) {
     return;
   }
 
-  std::set<ObjectEspPair> &entries = it_map->second;
+  std::set<WaitEntry> &entries = it_map->second;
   static constexpr uint32_t kStackThreshold = 256;
 
   for (auto it = entries.begin(); it != entries.end(); ++it) {
-    uint32_t entry_esp = it->second;
+    uint32_t entry_esp = it->esp;
 
     uint32_t diff = (current_esp > entry_esp) ? (current_esp - entry_esp)
                                               : (entry_esp - current_esp);
@@ -44,7 +49,6 @@ void Tracer::Remove(const std::string &function, uint32_t current_esp) {
 }
 
 void Tracer::ProcessCommand(const std::string &args) {
-
   if (args == "dump" || args.empty()) {
     std::cerr << "[WaitTrace] Wait table:" << std::endl;
     std::lock_guard<std::mutex> lock(tracer_mutex);
@@ -52,10 +56,8 @@ void Tracer::ProcessCommand(const std::string &args) {
       auto &func = func_set.first;
       std::cerr << "\t" << func_set.first << std::endl;
       for (auto &entry : func_set.second) {
-        auto object = entry.first;
-        auto esp = entry.second;
-
-        std::cerr << "\t\t" << object << " $esp: " << esp << std::endl;
+        std::cerr << "\t\t" << std::dec << entry.id << " obj: " << std::hex
+                  << entry.wait_object << " $esp: " << entry.esp << std::endl;
       }
     }
 
