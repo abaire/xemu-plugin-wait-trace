@@ -91,7 +91,7 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wait-trace-plugin-${{ runner.os }}
           path: ${{ matrix.artifact_pattern }}
