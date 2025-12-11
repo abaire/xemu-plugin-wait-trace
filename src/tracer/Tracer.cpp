@@ -17,8 +17,11 @@ void Tracer::Insert(const std::string& function, uint32_t esp,
   std::lock_guard lock(tracer_mutex_);
 
   std::vector trace_params(params, params + num_params);
-  auto entry =
-      std::make_shared<TraceEntry>(next_id_++, std::move(trace_params), esp);
+  CallKey key{
+      .params = std::move(trace_params),
+      .esp = esp,
+  };
+  auto entry = std::make_shared<TraceEntry>(next_id_++, std::move(key));
   entries_[function].insert(entry);
 }
 
@@ -36,7 +39,7 @@ void Tracer::Remove(const std::string& function, uint32_t current_esp) {
   uint32_t min_diff = kStackThreshold;
 
   for (auto it = entries.begin(); it != entries.end(); ++it) {
-    uint32_t entry_esp = (*it)->esp;
+    uint32_t entry_esp = (*it)->key.esp;
 
     uint32_t diff = (current_esp > entry_esp) ? (current_esp - entry_esp)
                                               : (entry_esp - current_esp);
@@ -61,11 +64,16 @@ void Tracer::Remove(const std::string& function, uint32_t current_esp) {
             << " at ESP 0x" << std::hex << current_esp << std::endl;
 }
 
-void Tracer::Count(const std::string& function, size_t num_params,
+void Tracer::Count(const std::string& function, uint32_t esp, size_t num_params,
                    const uint32_t* params) {
   std::lock_guard lock(tracer_mutex_);
   std::vector trace_params(params, params + num_params);
-  counters_[function][trace_params]++;
+  CallKey key{
+      .params = trace_params,
+      .esp = esp,
+  };
+  auto entry = std::make_shared<TraceEntry>(next_id_++, key);
+  counters_[function].push_back(entry);
 }
 
 void Tracer::ProcessCommand(const std::string& args) {
@@ -86,8 +94,8 @@ void Tracer::ProcessCommand(const std::string& args) {
       std::cerr << "\t" << func_set.first << std::endl;
       for (const auto& entry : func_set.second) {
         std::cerr << "\t\t" << std::dec << entry->id << " params: ";
-        print_params(entry->params);
-        std::cerr << " $esp: " << entry->esp << std::endl;
+        print_params(entry->key.params);
+        std::cerr << " $esp: " << entry->key.esp << std::endl;
       }
     }
 
@@ -95,11 +103,23 @@ void Tracer::ProcessCommand(const std::string& args) {
       std::cerr << "Counters:" << std::endl;
       for (const auto& func_set : counters_) {
         std::cerr << "\t" << func_set.first << std::endl;
+
+        std::map<CallKey, std::vector<uint32_t>> call_sites_to_ids;
         for (const auto& entry : func_set.second) {
-          std::cerr << "\t\t";
-          print_params(entry.first);
-          std::cerr << ": " << std::dec << entry.second << std::endl;
+          call_sites_to_ids[entry->key].push_back(entry->id);
         }
+
+        for (const auto& entry : call_sites_to_ids) {
+          std::cerr << "\t\t";
+          print_params(entry.first.params);
+          std::cerr << " esp:" << std::hex << entry.first.esp << std::dec
+                    << std::endl;
+
+          for (auto& id : entry.second) {
+            std::cerr << "\t\t\t" << id << std::endl;
+          }
+        }
+        std::cerr << std::endl;
       }
     }
 
@@ -134,9 +154,9 @@ extern "C" void TracerCmdCallback(const char* args) {
   tracer_instance.ProcessCommand(safe_args);
 }
 
-extern "C" void TracerCount(const char* function, size_t num_params,
-                            const uint32_t* params) {
+extern "C" void TracerCount(const char* function, uint32_t esp,
+                            size_t num_params, const uint32_t* params) {
   if (function) {
-    tracer_instance.Count(function, num_params, params);
+    tracer_instance.Count(function, esp, num_params, params);
   }
 }

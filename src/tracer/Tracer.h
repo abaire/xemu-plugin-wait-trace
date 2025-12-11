@@ -10,10 +10,19 @@
 #include <vector>
 
 struct Tracer {
-  struct TraceEntry {
-    uint32_t id;
+  struct CallKey {
     std::vector<uint32_t> params;
-    uint32_t esp;
+    uint32_t esp{0};
+
+    auto operator<=>(const CallKey&) const = default;
+  };
+
+  struct TraceEntry {
+    uint32_t id{0};
+    CallKey key;
+
+    TraceEntry() = default;
+    TraceEntry(uint32_t id, const CallKey& key) : id(id), key(key) {}
 
     auto operator<=>(const TraceEntry&) const = default;
   };
@@ -21,7 +30,7 @@ struct Tracer {
   void Insert(const std::string& function, uint32_t esp, size_t num_params,
               const uint32_t* params);
   void Remove(const std::string& function, uint32_t esp);
-  void Count(const std::string& function, size_t num_params,
+  void Count(const std::string& function, uint32_t esp, size_t num_params,
              const uint32_t* params);
 
   void ProcessCommand(const std::string& args);
@@ -37,7 +46,7 @@ struct Tracer {
   std::mutex tracer_mutex_;
   std::map<std::string, std::set<std::shared_ptr<TraceEntry>, TraceEntryPtrCmp>>
       entries_;
-  std::map<std::string, std::map<std::vector<uint32_t>, uint32_t>> counters_;
+  std::map<std::string, std::vector<std::shared_ptr<TraceEntry>>> counters_;
 
   uint32_t next_id_{0};
 };

@@ -15,7 +15,7 @@ void TracerPopEntry(const char* function, uint32_t esp);
 void TracerCmdCallback(const char* args);
 
 //! Increments the counter for the given function and params combination.
-void TracerCount(const char* function, size_t num_params,
+void TracerCount(const char* function, uint32_t esp, size_t num_params,
                  const uint32_t* params);
 
 #endif  // XEMU_WAIT_TRACE_PLUGIN_TRACERINTERFACE_H

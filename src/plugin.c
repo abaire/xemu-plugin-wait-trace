@@ -125,7 +125,7 @@ static void trace_entry_callback(unsigned int vcpu_index, void* userdata) {
   }
 
   if (config->count_only) {
-    TracerCount(config->function_name, config->num_arguments, params);
+    TracerCount(config->function_name, esp, config->num_arguments, params);
   } else {
     TracerPushEntry(config->function_name, esp, config->num_arguments, params);
   }
