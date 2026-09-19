@@ -14,3 +14,8 @@ Note that the addresses are likely kernel-specific and may need to be adjusted f
 Configure by setting the `XEMU_SOURCE_DIR` variable to the path to your xemu source tree.
 
 `cmake -S . -B build -DXEMU_SOURCE_DIR=<path_to_xemu_source> && cmake --build build --verbose`
+
+
+### Interaction
+
+You may want to incorporate https://github.com/abaire/xemu/tree/debug/adds_plugin_debug_monitor_interaction into your xemu build to allow interaction with plugins via the monitor.
